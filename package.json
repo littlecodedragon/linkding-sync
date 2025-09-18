@@ -1,0 +1,22 @@
+{
+  "name": "linkding-bookmark-sync",
+  "version": "0.1.0",
+  "description": "Firefox and Chrome extension that syncs Linkding bookmarks into the browser.",
+  "license": "MIT",
+  "author": "Alessandro Molina",
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "format": "prettier --write \"src/**/*.js\""
+  },
+  "dependencies": {
+    "lit": "^3.3.1"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-terser": "^0.4.4",
+    "prettier": "^3.6.2",
+    "rollup": "^4.49.0"
+  }
+}
