@@ -16,6 +16,13 @@ bookmark changes are pushed back to Linkding.
 - Skips archived bookmarks so only your active list is synced
 - Manual "Sync now" button and status view in the options page
 
+## Credits & Licensing
+
+- Original linkding extension: Sascha Ißbrücker
+- Logos adapted from the linkding project assets
+
+This project is released under the MIT License (see `LICENSE.txt`).
+
 ## Configuration
 
 1. Open the extension options (click the toolbar button or use your browser's
