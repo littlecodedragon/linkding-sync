@@ -22,13 +22,20 @@ const PARENT_FOLDER_TITLE_CANDIDATES = [
 ];
 const ROOT_IDS = new Set(["root________", "root_______", "root_________", "0"]);
 
-export async function performBookmarkSync({ api, previousState = {} }) {
+export async function performBookmarkSync({
+  api,
+  previousState = {},
+  configuration = {},
+}) {
   const remoteBookmarks = await api.getAllBookmarks({ includeArchived: false });
   const activeBookmarks = remoteBookmarks.filter(
     (bookmark) => !isBookmarkArchived(bookmark),
   );
 
-  const rootFolder = await ensureSyncRootFolder(previousState.syncFolderId);
+  const rootFolder = await ensureSyncRootFolder({
+    existingFolderId: previousState.syncFolderId,
+    preferredParentId: configuration.syncParentFolderId,
+  });
   await clearFolderContents(rootFolder.id);
 
   const createdNodes = await populateFolders(rootFolder.id, activeBookmarks);
@@ -40,20 +47,48 @@ export async function performBookmarkSync({ api, previousState = {} }) {
   };
 }
 
-async function ensureSyncRootFolder(existingFolderId) {
+async function ensureSyncRootFolder({ existingFolderId, preferredParentId }) {
+  const preferredParent = await getPreferredParentFolder(preferredParentId);
+
   if (existingFolderId) {
     const existing = await getFolderById(existingFolderId);
     if (existing) {
+      if (preferredParent && existing.parentId !== preferredParent.id) {
+        try {
+          await browser.bookmarks.move(existing.id, {
+            parentId: preferredParent.id,
+          });
+          const moved = await getFolderById(existing.id);
+          if (moved) {
+            return moved;
+          }
+        } catch (error) {
+          console.warn("Failed to move existing Linkding folder", error);
+        }
+      }
       return existing;
     }
   }
 
   const discovered = await findExistingSyncFolderByTitle();
   if (discovered) {
+    if (preferredParent && discovered.parentId !== preferredParent.id) {
+      try {
+        await browser.bookmarks.move(discovered.id, {
+          parentId: preferredParent.id,
+        });
+        const moved = await getFolderById(discovered.id);
+        if (moved) {
+          return moved;
+        }
+      } catch (error) {
+        console.warn("Failed to move discovered Linkding folder", error);
+      }
+    }
     return discovered;
   }
 
-  const parentFolder = await getPreferredParentFolder();
+  const parentFolder = preferredParent;
   const children = await browser.bookmarks.getChildren(parentFolder.id);
   const existingSyncFolder = children.find(
     (child) => !child.url && child.title === SYNC_FOLDER_TITLE,
@@ -91,7 +126,14 @@ async function findExistingSyncFolderByTitle() {
   }
 }
 
-async function getPreferredParentFolder() {
+async function getPreferredParentFolder(preferredParentId) {
+  if (preferredParentId) {
+    const preferred = await getFolderById(preferredParentId);
+    if (preferred) {
+      return preferred;
+    }
+  }
+
   for (const candidateId of PARENT_FOLDER_ID_CANDIDATES) {
     const node = await getFolderById(candidateId);
     if (node) {

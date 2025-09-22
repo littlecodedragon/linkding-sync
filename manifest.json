@@ -1,5 +1,5 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "name": "Linkding Bookmark Sync",
   "version": "0.1.0",
   "description": "Sync a Linkding server with a Linkding bookmark folder in your browser.",
@@ -11,10 +11,9 @@
     "128": "icons/logo_128x128.png"
   },
   "background": {
-    "scripts": ["build/background.js"],
-    "persistent": true
+    "service_worker": "build/background.js"
   },
-  "browser_action": {
+  "action": {
     "default_icon": {
       "19": "icons/button_19x19.png",
       "32": "icons/button_32x32.png",
@@ -31,7 +30,9 @@
     "bookmarks",
     "storage",
     "alarms",
-    "tabs",
+    "tabs"
+  ],
+  "host_permissions": [
     "http://*/*",
     "https://*/*"
   ]

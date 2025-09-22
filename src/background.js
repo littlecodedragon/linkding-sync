@@ -41,6 +41,8 @@ function scheduleRecurringSync(config) {
 }
 
 async function runSync({ reason } = {}) {
+  configuration = await getConfiguration();
+
   if (syncInProgress) {
     return { skipped: true, reason: "in_progress" };
   }
@@ -63,6 +65,7 @@ async function runSync({ reason } = {}) {
     const result = await performBookmarkSync({
       api,
       previousState: stateBefore,
+      configuration,
     });
 
     await updateSyncState({
@@ -73,14 +76,23 @@ async function runSync({ reason } = {}) {
 
     return { ...result, reason };
   } catch (error) {
-    const message = error?.message || String(error);
+    const runtimeMessage = browser.runtime?.lastError?.message;
+    const message =
+      (typeof error?.message === "string" && error.message.trim().length
+        ? error.message
+        : null) ||
+      (typeof runtimeMessage === "string" && runtimeMessage.trim().length
+        ? runtimeMessage
+        : null) ||
+      String(error) ||
+      "Unknown error";
     await updateSyncState({
       inProgress: false,
       lastFailure: Date.now(),
       lastError: message,
     });
-    console.error("Linkding sync failed", error);
-    throw error;
+    console.error("Linkding sync failed", message, error);
+    throw new Error(message);
   } finally {
     syncInProgress = false;
   }
@@ -120,31 +132,53 @@ browser.alarms.onAlarm.addListener((alarm) => {
   );
 });
 
-if (browser.browserAction?.onClicked) {
-  browser.browserAction.onClicked.addListener(() => {
+const browserAction = browser.action || browser.browserAction;
+if (browserAction?.onClicked) {
+  browserAction.onClicked.addListener(() => {
     browser.runtime.openOptionsPage();
   });
 }
 
-browser.runtime.onMessage.addListener((message) => {
+browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== "object") {
-    return undefined;
+    return false;
   }
 
   if (message.type === "linkding.sync.now") {
-    return runSync({ reason: "manual" })
-      .then((result) => ({ status: "ok", result }))
-      .catch((error) => ({
-        status: "error",
-        message: error?.message || String(error),
-      }));
+    runSync({ reason: "manual" })
+      .then((result) => {
+        sendResponse({ status: "ok", result });
+      })
+      .catch((error) => {
+        const errorMessage =
+          (typeof error?.message === "string" && error.message.trim().length
+            ? error.message
+            : null) ||
+          String(error) ||
+          "Unknown error";
+        sendResponse({ status: "error", message: errorMessage });
+      });
+
+    return true; // keep the message channel open for async response
   }
 
   if (message.type === "linkding.sync.state") {
-    return getSyncState();
+    getSyncState()
+      .then((state) => sendResponse({ status: "ok", state }))
+      .catch((error) => {
+        const errorMessage =
+          (typeof error?.message === "string" && error.message.trim().length
+            ? error.message
+            : null) ||
+          String(error) ||
+          "Unknown error";
+        sendResponse({ status: "error", message: errorMessage });
+      });
+
+    return true;
   }
 
-  return undefined;
+  return false;
 });
 
 refreshConfiguration().catch((error) =>

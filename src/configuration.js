@@ -6,6 +6,7 @@ const DEFAULTS = {
   baseUrl: "",
   token: "",
   syncIntervalMinutes: 30,
+  syncParentFolderId: "",
 };
 
 function normalizeConfiguration(config = {}) {
@@ -13,6 +14,9 @@ function normalizeConfiguration(config = {}) {
   const token = (config.token || "").trim();
   const interval = Number(config.syncIntervalMinutes) || DEFAULTS.syncIntervalMinutes;
   const syncIntervalMinutes = Math.min(Math.max(interval, 5), 720); // clamp between 5 minutes and 12 hours
+  const syncParentFolderId = config.syncParentFolderId
+    ? String(config.syncParentFolderId).trim()
+    : "";
 
   return {
     ...DEFAULTS,
@@ -20,6 +24,7 @@ function normalizeConfiguration(config = {}) {
     baseUrl,
     token,
     syncIntervalMinutes,
+    syncParentFolderId,
   };
 }
 

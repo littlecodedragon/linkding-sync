@@ -15,12 +15,15 @@ export class Options extends LitElement {
     baseUrl: { type: String, state: true },
     token: { type: String, state: true },
     syncIntervalMinutes: { type: Number, state: true },
+    syncParentFolderId: { type: String, state: true },
     isSaving: { type: Boolean, state: true },
     saveSuccess: { type: Boolean, state: true },
     saveError: { type: String, state: true },
     syncState: { type: Object, state: true },
     manualSyncInProgress: { type: Boolean, state: true },
     manualSyncError: { type: String, state: true },
+    bookmarkFolders: { type: Array, state: true },
+    syncParentFolderMissing: { type: Boolean, state: true },
   };
 
   constructor() {
@@ -28,6 +31,7 @@ export class Options extends LitElement {
     this.baseUrl = "";
     this.token = "";
     this.syncIntervalMinutes = 30;
+    this.syncParentFolderId = "";
     this.isSaving = false;
     this.saveSuccess = false;
     this.saveError = "";
@@ -35,6 +39,8 @@ export class Options extends LitElement {
     this.manualSyncInProgress = false;
     this.manualSyncError = "";
     this._storageListener = null;
+    this.bookmarkFolders = [];
+    this.syncParentFolderMissing = false;
   }
 
   createRenderRoot() {
@@ -45,6 +51,7 @@ export class Options extends LitElement {
     this.classList.add("options");
     await this.loadConfiguration();
     await this.loadSyncState();
+    await this.loadBookmarkFolders();
     this.subscribeToSyncStateUpdates();
   }
 
@@ -61,10 +68,69 @@ export class Options extends LitElement {
     this.baseUrl = config.baseUrl;
     this.token = config.token;
     this.syncIntervalMinutes = config.syncIntervalMinutes;
+    this.syncParentFolderId = config.syncParentFolderId
+      ? String(config.syncParentFolderId)
+      : "";
   }
 
   async loadSyncState() {
     this.syncState = await getSyncState();
+  }
+
+  async loadBookmarkFolders() {
+    try {
+      const browser = getBrowser();
+      const tree = await browser.bookmarks.getTree();
+      const folders = [];
+      const excludedRootIds = new Set([
+        "0",
+        "root________",
+        "root_______",
+        "root_________",
+      ]);
+
+      const walk = (node, ancestors = []) => {
+        if (!node || node.url) {
+          return;
+        }
+
+        const isRoot = typeof node.parentId === "undefined" || node.parentId === null;
+        const label = (node.title || "Untitled").trim();
+        const path = ancestors.length ? `${ancestors.join(" / ")} / ${label}` : label;
+
+        const stringId = String(node.id || "").trim();
+        const hasValidLabel = label.length > 0;
+        const shouldInclude =
+          stringId.length > 0 &&
+          !excludedRootIds.has(stringId) &&
+          hasValidLabel;
+
+        if (shouldInclude) {
+          folders.push({ id: stringId, path });
+        }
+
+        if (Array.isArray(node.children) && node.children.length) {
+          const nextAncestors = isRoot ? [] : [...ancestors, label];
+          node.children.forEach((child) => walk(child, nextAncestors));
+        }
+      };
+
+      tree.forEach((root) => walk(root));
+      folders.sort((a, b) => a.path.localeCompare(b.path));
+
+      this.bookmarkFolders = folders;
+
+      if (this.syncParentFolderId) {
+        const match = folders.some((folder) => folder.id === this.syncParentFolderId);
+        this.syncParentFolderMissing = !match;
+      } else {
+        this.syncParentFolderMissing = false;
+      }
+    } catch (error) {
+      console.error("Failed to load bookmark folders", error);
+      this.bookmarkFolders = [];
+      this.syncParentFolderMissing = Boolean(this.syncParentFolderId);
+    }
   }
 
   subscribeToSyncStateUpdates() {
@@ -89,6 +155,10 @@ export class Options extends LitElement {
     } else {
       this[property] = event.target.value;
     }
+
+    if (property === "syncParentFolderId") {
+      this.syncParentFolderMissing = false;
+    }
   }
 
   async handleSubmit(event) {
@@ -101,6 +171,7 @@ export class Options extends LitElement {
       baseUrl: this.baseUrl,
       token: this.token,
       syncIntervalMinutes: this.syncIntervalMinutes,
+      syncParentFolderId: this.syncParentFolderId,
     };
 
     const api = new LinkdingApi(config);
@@ -151,6 +222,25 @@ export class Options extends LitElement {
     } catch (error) {
       return "Never";
     }
+  }
+
+  getCurrentFolderLabel() {
+    if (!this.syncParentFolderId) {
+      return "Automatic";
+    }
+
+    const match = this.bookmarkFolders.find(
+      (folder) => folder.id === this.syncParentFolderId,
+    );
+    if (match) {
+      return `${match.path} (id: ${match.id})`;
+    }
+
+    if (this.syncParentFolderMissing) {
+      return `Missing (id: ${this.syncParentFolderId})`;
+    }
+
+    return `id: ${this.syncParentFolderId}`;
   }
 
   renderSyncSummary() {
@@ -245,6 +335,35 @@ export class Options extends LitElement {
           />
           <div class="form-input-hint">
             How often the extension should refresh bookmarks automatically.
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="input-parent-folder">
+            Sync folder location
+            <span class="form-label-note">(current: ${this.getCurrentFolderLabel()})</span>
+          </label>
+          <select
+            class="form-input"
+            id="input-parent-folder"
+            .value=${this.syncParentFolderId}
+            @change=${(event) => this.handleInputChange(event, "syncParentFolderId")}
+          >
+            <option value="" ?selected=${!this.syncParentFolderId}>
+              Automatic (Other/Unsorted bookmarks)
+            </option>
+            ${this.bookmarkFolders.map(
+              (folder) => html`<option
+                value=${folder.id}
+                ?selected=${folder.id === this.syncParentFolderId}
+              >
+                ${folder.path}
+              </option>`,
+            )}
+          </select>
+          <div class="form-input-hint">
+            Select where the <strong>Linkding</strong> folder should be created. Leave
+            automatic to let the extension choose a location.
           </div>
         </div>
 
