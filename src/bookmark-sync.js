@@ -36,7 +36,6 @@ export async function performBookmarkSync({
     existingFolderId: previousState.syncFolderId,
     preferredParentId: configuration.syncParentFolderId,
   });
-  await clearFolderContents(rootFolder.id);
 
   const createdNodes = await populateFolders(rootFolder.id, activeBookmarks);
 
@@ -225,76 +224,59 @@ function isRootNode(node) {
   return typeof node.parentId === "undefined" || node.parentId === null;
 }
 
-async function clearFolderContents(folderId) {
-  const children = await browser.bookmarks.getChildren(folderId);
-  for (const child of children) {
+async function populateFolders(rootFolderId, bookmarks) {
+  const { tagMap, orderedTagKeys } = prepareRemoteBookmarkIndex(bookmarks);
+
+  const existingChildren = await browser.bookmarks.getChildren(rootFolderId);
+  const existingFoldersByTitle = new Map();
+  const unusedFolderIds = new Set();
+
+  for (const child of existingChildren) {
     if (child.url) {
       await browser.bookmarks.remove(child.id);
-    } else {
-      await browser.bookmarks.removeTree(child.id);
-    }
-  }
-}
-
-async function populateFolders(rootFolderId, bookmarks) {
-  const folderCache = new Map();
-  const folderUrlCache = new Map();
-  let created = 0;
-
-  const prepared = [];
-  for (const bookmark of bookmarks) {
-    if (!bookmark?.url) {
       continue;
     }
-    const tags = extractTags(bookmark);
-    const title = getBookmarkTitle(bookmark);
-    prepared.push({ bookmark, tags, title });
+
+    existingFoldersByTitle.set(child.title, child);
+    unusedFolderIds.add(child.id);
   }
 
-  const uniqueTags = new Set();
-  let hasUntagged = false;
-  for (const item of prepared) {
-    for (const tag of item.tags) {
-      if (tag === null) {
-        hasUntagged = true;
-      } else {
-        uniqueTags.add(tag);
+  let created = 0;
+
+  for (let index = 0; index < orderedTagKeys.length; index++) {
+    const tagKey = orderedTagKeys[index];
+    const tag = tagKey === UNTAGGED_CACHE_KEY ? null : tagKey;
+    const title = getTagLabel(tag);
+    const remoteEntries = tagMap.get(tagKey)?.list ?? [];
+
+    let folder = existingFoldersByTitle.get(title) || null;
+    if (folder) {
+      unusedFolderIds.delete(folder.id);
+      try {
+        folder = await browser.bookmarks.move(folder.id, {
+          parentId: rootFolderId,
+          index,
+        });
+      } catch (error) {
+        console.warn("Failed to move existing tag folder", title, error);
+        const refreshed = await getFolderById(folder.id);
+        if (refreshed) {
+          folder = refreshed;
+        }
       }
-    }
-  }
-
-  const collator = new Intl.Collator(undefined, { sensitivity: "base" });
-  const tagsForCreation = [
-    ...Array.from(uniqueTags),
-    ...(hasUntagged ? [null] : []),
-  ].sort((a, b) => collator.compare(getTagLabel(a), getTagLabel(b)));
-
-  for (let index = 0; index < tagsForCreation.length; index++) {
-    const tag = tagsForCreation[index];
-    await ensureTagFolder(rootFolderId, tag, folderCache, { index });
-  }
-
-  for (const { bookmark, tags, title } of prepared) {
-    for (const tag of tags) {
-      const folder = await ensureTagFolder(rootFolderId, tag, folderCache);
-      let urlSet = folderUrlCache.get(folder.id);
-      if (!urlSet) {
-        urlSet = new Set();
-        folderUrlCache.set(folder.id, urlSet);
-      }
-
-      if (urlSet.has(bookmark.url)) {
-        continue;
-      }
-
-      await browser.bookmarks.create({
-        parentId: folder.id,
+    } else {
+      folder = await browser.bookmarks.create({
+        parentId: rootFolderId,
         title,
-        url: bookmark.url,
+        index,
       });
-      urlSet.add(bookmark.url);
-      created += 1;
     }
+
+    created += await syncFolderBookmarks(folder.id, remoteEntries);
+  }
+
+  for (const folderId of unusedFolderIds) {
+    await browser.bookmarks.removeTree(folderId);
   }
 
   return created;
@@ -315,23 +297,6 @@ function extractTags(bookmark) {
   return sanitized;
 }
 
-async function ensureTagFolder(rootFolderId, tag, cache, options = {}) {
-  const cacheKey = tag ?? "__untagged__";
-  if (cache.has(cacheKey)) {
-    return cache.get(cacheKey);
-  }
-
-  const title = tag === null ? UNTAGGED_FOLDER_TITLE : tag;
-  const folder = await browser.bookmarks.create({
-    parentId: rootFolderId,
-    title,
-    ...(typeof options.index === "number" ? { index: options.index } : {}),
-  });
-
-  cache.set(cacheKey, folder);
-  return folder;
-}
-
 function getBookmarkTitle(bookmark) {
   return (
     (bookmark.title && bookmark.title.trim()) ||
@@ -342,4 +307,94 @@ function getBookmarkTitle(bookmark) {
 
 function getTagLabel(tag) {
   return tag === null ? UNTAGGED_FOLDER_TITLE : tag;
+}
+
+const UNTAGGED_CACHE_KEY = "__untagged__";
+
+function prepareRemoteBookmarkIndex(bookmarks) {
+  const tagMap = new Map();
+
+  for (const bookmark of bookmarks) {
+    if (!bookmark?.url) {
+      continue;
+    }
+
+    const tags = extractTags(bookmark);
+    const title = getBookmarkTitle(bookmark);
+
+    for (const tag of tags) {
+      const cacheKey = tag === null ? UNTAGGED_CACHE_KEY : tag;
+      let bucket = tagMap.get(cacheKey);
+      if (!bucket) {
+        bucket = { list: [], byUrl: new Map() };
+        tagMap.set(cacheKey, bucket);
+      }
+
+      const existing = bucket.byUrl.get(bookmark.url);
+      if (existing) {
+        existing.title = title;
+        continue;
+      }
+
+      const record = { url: bookmark.url, title };
+      bucket.list.push(record);
+      bucket.byUrl.set(bookmark.url, record);
+    }
+  }
+
+  const collator = new Intl.Collator(undefined, { sensitivity: "base" });
+  const orderedTagKeys = Array.from(tagMap.keys()).sort((a, b) =>
+    collator.compare(getTagLabel(a === UNTAGGED_CACHE_KEY ? null : a), getTagLabel(b === UNTAGGED_CACHE_KEY ? null : b)),
+  );
+
+  return { tagMap, orderedTagKeys };
+}
+
+async function syncFolderBookmarks(folderId, remoteEntries) {
+  const children = await browser.bookmarks.getChildren(folderId);
+  const existingByUrl = new Map();
+
+  for (const child of children) {
+    if (child.url) {
+      existingByUrl.set(child.url, child);
+    } else {
+      await browser.bookmarks.removeTree(child.id);
+    }
+  }
+
+  let created = 0;
+
+  for (let index = 0; index < remoteEntries.length; index++) {
+    const remoteEntry = remoteEntries[index];
+    const existing = existingByUrl.get(remoteEntry.url);
+
+    if (existing) {
+      existingByUrl.delete(remoteEntry.url);
+
+      if (existing.title !== remoteEntry.title) {
+        await browser.bookmarks.update(existing.id, { title: remoteEntry.title });
+      }
+
+      await browser.bookmarks.move(existing.id, {
+        parentId: folderId,
+        index,
+      });
+
+      continue;
+    }
+
+    await browser.bookmarks.create({
+      parentId: folderId,
+      title: remoteEntry.title,
+      url: remoteEntry.url,
+      index,
+    });
+    created += 1;
+  }
+
+  for (const leftover of existingByUrl.values()) {
+    await browser.bookmarks.remove(leftover.id);
+  }
+
+  return created;
 }
