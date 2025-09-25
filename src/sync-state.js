@@ -11,6 +11,7 @@ const DEFAULT_STATE = {
   remoteBookmarkCount: 0,
   createdBrowserNodes: 0,
   syncFolderId: null,
+  skipped: false,
 };
 
 export async function getSyncState() {

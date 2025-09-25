@@ -199,6 +199,7 @@ export class Options extends LitElement {
     try {
       const response = await getBrowser().runtime.sendMessage({
         type: "linkding.sync.now",
+        resetHash: true,
       });
 
       if (!response || response.status !== "ok") {

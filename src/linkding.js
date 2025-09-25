@@ -63,6 +63,7 @@ export class LinkdingApi {
 
   async getAllBookmarks({ includeArchived = false } = {}) {
     const collected = [];
+    const rawResponses = [];
     let nextUrl = this.buildUrl("/api/bookmarks/", {
       limit: API_PAGE_SIZE,
       ...(includeArchived ? {} : { is_archived: "false" }),
@@ -79,7 +80,9 @@ export class LinkdingApi {
         );
       }
 
-      const body = await response.json();
+      const text = await response.text();
+      rawResponses.push(text);
+      const body = JSON.parse(text);
       const results = Array.isArray(body.results) ? body.results : [];
       const filtered = includeArchived
         ? results
@@ -89,7 +92,13 @@ export class LinkdingApi {
       nextUrl = this.normalizeNextUrl(body.next);
     }
 
-    return collected;
+    const rawSource = rawResponses.length ? rawResponses.join("\n") : "";
+    const remoteHash = await computeHash(rawSource);
+
+    return {
+      bookmarks: collected,
+      remoteHash,
+    };
   }
 
   async getTags({ limit = 5000 } = {}) {
@@ -150,4 +159,22 @@ export function isBookmarkArchived(bookmark) {
     return bookmark.archived;
   }
   return false;
+}
+
+async function computeHash(input) {
+  const normalized = typeof input === "string" ? input : "";
+  const encoder = new TextEncoder();
+  const data = encoder.encode(normalized);
+
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("Cryptographic hashing not supported in this environment.");
+  }
+
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", data);
+  const bytes = new Uint8Array(digest);
+  let hash = "";
+  for (const byte of bytes) {
+    hash += byte.toString(16).padStart(2, "0");
+  }
+  return hash;
 }

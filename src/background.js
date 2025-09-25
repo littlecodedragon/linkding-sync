@@ -1,8 +1,8 @@
 import { getBrowser } from "./browser";
 import {
-  CONFIG_KEY,
   getConfiguration,
   isConfigurationComplete,
+  saveConfigurationHash,
 } from "./configuration";
 import { LinkdingApi } from "./linkding";
 import {
@@ -17,6 +17,17 @@ const SYNC_ALARM_NAME = "linkding-sync";
 
 let configuration = null;
 let syncInProgress = false;
+
+async function updateConfigurationHash(hash) {
+  const targetHash = hash || "";
+  const currentConfig = configuration || (await getConfiguration());
+
+  if (currentConfig.lastRemoteHash === targetHash) {
+    return;
+  }
+
+  configuration = await saveConfigurationHash(targetHash, currentConfig);
+}
 
 async function refreshConfiguration({ triggerSync = false } = {}) {
   configuration = await getConfiguration();
@@ -68,6 +79,10 @@ async function runSync({ reason } = {}) {
       configuration,
     });
 
+    if (typeof result.remoteHash === "string") {
+      await updateConfigurationHash(result.remoteHash);
+    }
+
     await updateSyncState({
       ...result,
       inProgress: false,
@@ -110,42 +125,30 @@ browser.runtime.onStartup.addListener(() => {
   );
 });
 
-browser.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName !== "local") {
-    return;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(changes, CONFIG_KEY)) {
-    refreshConfiguration({ triggerSync: true }).catch((error) =>
-      console.error("Failed to refresh configuration", error),
-    );
-  }
-});
-
-browser.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name !== SYNC_ALARM_NAME) {
-    return;
-  }
-
-  runSync({ reason: "alarm" }).catch((error) =>
-    console.error("Scheduled sync failed", error),
-  );
-});
-
-const browserAction = browser.action || browser.browserAction;
-if (browserAction?.onClicked) {
-  browserAction.onClicked.addListener(() => {
-    browser.runtime.openOptionsPage();
-  });
-}
-
 browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== "object") {
     return false;
   }
 
+  if (message.type === "linkding.config.updated") {
+    refreshConfiguration({ triggerSync: true }).catch((error) =>
+      console.error("Failed to refresh configuration", error),
+    );
+    sendResponse({ status: "ok" });
+    return false;
+  }
+
   if (message.type === "linkding.sync.now") {
-    runSync({ reason: "manual" })
+    const shouldResetHash = Boolean(message.resetHash);
+
+    const run = shouldResetHash
+      ? updateConfigurationHash("").catch((error) => {
+          console.error("Failed to reset sync hash", error);
+        })
+      : Promise.resolve();
+
+    run
+      .then(() => runSync({ reason: "manual" }))
       .then((result) => {
         sendResponse({ status: "ok", result });
       })
@@ -179,6 +182,16 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   return false;
+});
+
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== SYNC_ALARM_NAME) {
+    return;
+  }
+
+  runSync({ reason: "alarm" }).catch((error) =>
+    console.error("Scheduled sync failed", error),
+  );
 });
 
 refreshConfiguration().catch((error) =>

@@ -1,4 +1,4 @@
-import { getStorageItem, setStorageItem } from "./browser";
+import { getStorageItem, getBrowser, setStorageItem } from "./browser";
 
 export const CONFIG_KEY = "ld_sync_config";
 
@@ -7,6 +7,7 @@ const DEFAULTS = {
   token: "",
   syncIntervalMinutes: 30,
   syncParentFolderId: "",
+  lastRemoteHash: "",
 };
 
 function normalizeConfiguration(config = {}) {
@@ -17,6 +18,9 @@ function normalizeConfiguration(config = {}) {
   const syncParentFolderId = config.syncParentFolderId
     ? String(config.syncParentFolderId).trim()
     : "";
+  const lastRemoteHash = config.lastRemoteHash
+    ? String(config.lastRemoteHash).trim()
+    : "";
 
   return {
     ...DEFAULTS,
@@ -25,6 +29,7 @@ function normalizeConfiguration(config = {}) {
     token,
     syncIntervalMinutes,
     syncParentFolderId,
+    lastRemoteHash,
   };
 }
 
@@ -47,7 +52,27 @@ export async function saveConfiguration(config) {
   const normalized = normalizeConfiguration(config);
   const configJson = JSON.stringify(normalized);
   await setStorageItem(CONFIG_KEY, configJson);
+  try {
+    await getBrowser().runtime.sendMessage({
+      type: "linkding.config.updated",
+      payload: normalized,
+    });
+  } catch (error) {
+    console.warn("Failed to notify configuration update", error);
+  }
   return normalized;
+}
+
+export async function saveConfigurationHash(hash, currentConfig = null) {
+  const baseConfig = currentConfig || (await getConfiguration());
+  const lastRemoteHash = hash ? String(hash).trim() : "";
+  const next = {
+    ...baseConfig,
+    lastRemoteHash,
+  };
+  const configJson = JSON.stringify(next);
+  await setStorageItem(CONFIG_KEY, configJson);
+  return next;
 }
 
 export function isConfigurationComplete(config) {

@@ -27,10 +27,37 @@ export async function performBookmarkSync({
   previousState = {},
   configuration = {},
 }) {
-  const remoteBookmarks = await api.getAllBookmarks({ includeArchived: false });
+  const { bookmarks: remoteBookmarks, remoteHash } = await api.getAllBookmarks({
+    includeArchived: false,
+  });
   const activeBookmarks = remoteBookmarks.filter(
     (bookmark) => !isBookmarkArchived(bookmark),
   );
+
+  if (configuration.lastRemoteHash && configuration.lastRemoteHash === remoteHash) {
+    if (previousState.syncFolderId) {
+      const existingFolder = await getFolderById(previousState.syncFolderId);
+      if (!existingFolder) {
+        console.warn("Linkding sync folder missing despite matching hash; rebuilding.");
+      } else {
+        return {
+          syncFolderId: previousState.syncFolderId,
+          remoteBookmarkCount: activeBookmarks.length,
+          createdBrowserNodes: 0,
+          skipped: true,
+          remoteHash,
+        };
+      }
+    } else {
+      return {
+        syncFolderId: null,
+        remoteBookmarkCount: activeBookmarks.length,
+        createdBrowserNodes: 0,
+        skipped: true,
+        remoteHash,
+      };
+    }
+  }
 
   const rootFolder = await ensureSyncRootFolder({
     existingFolderId: previousState.syncFolderId,
@@ -43,6 +70,8 @@ export async function performBookmarkSync({
     syncFolderId: rootFolder.id,
     remoteBookmarkCount: activeBookmarks.length,
     createdBrowserNodes: createdNodes,
+    skipped: false,
+    remoteHash,
   };
 }
 
@@ -252,16 +281,23 @@ async function populateFolders(rootFolderId, bookmarks) {
     let folder = existingFoldersByTitle.get(title) || null;
     if (folder) {
       unusedFolderIds.delete(folder.id);
-      try {
-        folder = await browser.bookmarks.move(folder.id, {
-          parentId: rootFolderId,
-          index,
-        });
-      } catch (error) {
-        console.warn("Failed to move existing tag folder", title, error);
-        const refreshed = await getFolderById(folder.id);
-        if (refreshed) {
-          folder = refreshed;
+
+      const needsReparenting = folder.parentId !== rootFolderId;
+      const needsReordering =
+        typeof folder.index !== "number" || folder.index !== index;
+
+      if (needsReparenting || needsReordering) {
+        try {
+          folder = await browser.bookmarks.move(folder.id, {
+            parentId: rootFolderId,
+            index,
+          });
+        } catch (error) {
+          console.warn("Failed to move existing tag folder", title, error);
+          const refreshed = await getFolderById(folder.id);
+          if (refreshed) {
+            folder = refreshed;
+          }
         }
       }
     } else {
@@ -375,10 +411,16 @@ async function syncFolderBookmarks(folderId, remoteEntries) {
         await browser.bookmarks.update(existing.id, { title: remoteEntry.title });
       }
 
-      await browser.bookmarks.move(existing.id, {
-        parentId: folderId,
-        index,
-      });
+      const needsReparenting = existing.parentId !== folderId;
+      const needsReordering =
+        typeof existing.index !== "number" || existing.index !== index;
+
+      if (needsReparenting || needsReordering) {
+        await browser.bookmarks.move(existing.id, {
+          parentId: folderId,
+          index,
+        });
+      }
 
       continue;
     }
