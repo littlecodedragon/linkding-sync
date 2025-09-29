@@ -5,6 +5,12 @@
   "description": "Sync a Linkding server with a Linkding bookmark folder in your browser.",
   "author": "Alessandro Molina",
   "homepage_url": "https://codeberg.org/Inlinestyle/linkding-sync",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{77a85a31-8247-498c-a898-a060e3b0b46d}",
+      "strict_min_version": "120.0"
+    }
+  },
   "icons": {
     "48": "icons/logo_48x48.png",
     "96": "icons/logo_96x96.png",
