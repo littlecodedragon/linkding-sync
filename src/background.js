@@ -1,9 +1,5 @@
 import { getBrowser } from "./browser";
-import {
-  getConfiguration,
-  isConfigurationComplete,
-  saveConfigurationHash,
-} from "./configuration";
+import { getConfiguration, isConfigurationComplete, saveConfigurationHash } from "./configuration";
 import { LinkdingApi } from "./linkding";
 import {
   SYNC_STATE_KEY,

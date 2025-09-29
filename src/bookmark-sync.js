@@ -258,7 +258,7 @@ async function populateFolders(rootFolderId, bookmarks) {
 
   const existingChildren = await browser.bookmarks.getChildren(rootFolderId);
   const existingFoldersByTitle = new Map();
-  const unusedFolderIds = new Set();
+  const foldersToRemove = new Set();
 
   for (const child of existingChildren) {
     if (child.url) {
@@ -267,7 +267,7 @@ async function populateFolders(rootFolderId, bookmarks) {
     }
 
     existingFoldersByTitle.set(child.title, child);
-    unusedFolderIds.add(child.id);
+    foldersToRemove.add(child.id);
   }
 
   let created = 0;
@@ -280,25 +280,13 @@ async function populateFolders(rootFolderId, bookmarks) {
 
     let folder = existingFoldersByTitle.get(title) || null;
     if (folder) {
-      unusedFolderIds.delete(folder.id);
+      foldersToRemove.delete(folder.id);
 
-      const needsReparenting = folder.parentId !== rootFolderId;
-      const needsReordering =
-        typeof folder.index !== "number" || folder.index !== index;
-
-      if (needsReparenting || needsReordering) {
-        try {
-          folder = await browser.bookmarks.move(folder.id, {
-            parentId: rootFolderId,
-            index,
-          });
-        } catch (error) {
-          console.warn("Failed to move existing tag folder", title, error);
-          const refreshed = await getFolderById(folder.id);
-          if (refreshed) {
-            folder = refreshed;
-          }
-        }
+      if (folder.parentId !== rootFolderId || folder.index !== index) {
+        folder = await browser.bookmarks.move(folder.id, {
+          parentId: rootFolderId,
+          index,
+        });
       }
     } else {
       folder = await browser.bookmarks.create({
@@ -311,7 +299,7 @@ async function populateFolders(rootFolderId, bookmarks) {
     created += await syncFolderBookmarks(folder.id, remoteEntries);
   }
 
-  for (const folderId of unusedFolderIds) {
+  for (const folderId of foldersToRemove) {
     await browser.bookmarks.removeTree(folderId);
   }
 
@@ -400,8 +388,7 @@ async function syncFolderBookmarks(folderId, remoteEntries) {
 
   let created = 0;
 
-  for (let index = 0; index < remoteEntries.length; index++) {
-    const remoteEntry = remoteEntries[index];
+  for (const remoteEntry of remoteEntries) {
     const existing = existingByUrl.get(remoteEntry.url);
 
     if (existing) {
@@ -411,17 +398,6 @@ async function syncFolderBookmarks(folderId, remoteEntries) {
         await browser.bookmarks.update(existing.id, { title: remoteEntry.title });
       }
 
-      const needsReparenting = existing.parentId !== folderId;
-      const needsReordering =
-        typeof existing.index !== "number" || existing.index !== index;
-
-      if (needsReparenting || needsReordering) {
-        await browser.bookmarks.move(existing.id, {
-          parentId: folderId,
-          index,
-        });
-      }
-
       continue;
     }
 
@@ -429,7 +405,6 @@ async function syncFolderBookmarks(folderId, remoteEntries) {
       parentId: folderId,
       title: remoteEntry.title,
       url: remoteEntry.url,
-      index,
     });
     created += 1;
   }
