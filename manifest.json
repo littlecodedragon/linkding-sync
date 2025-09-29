@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "description": "Sync a Linkding server with a Linkding bookmark folder in your browser.",
   "author": "Alessandro Molina",
-  "homepage_url": "https://github.com/linkdingsync",
+  "homepage_url": "https://codeberg.org/Inlinestyle/linkding-sync",
   "icons": {
     "48": "icons/logo_48x48.png",
     "96": "icons/logo_96x96.png",
