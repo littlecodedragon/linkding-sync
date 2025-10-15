@@ -333,6 +333,18 @@ function getTagLabel(tag) {
   return tag === null ? UNTAGGED_FOLDER_TITLE : tag;
 }
 
+function normalizeBookmarkUrl(url) {
+  if (!url) {
+    return "";
+  }
+  try {
+    const normalized = new URL(url);
+    return normalized.href;
+  } catch (error) {
+    return url;
+  }
+}
+
 const UNTAGGED_CACHE_KEY = "__untagged__";
 
 function prepareRemoteBookmarkIndex(bookmarks) {
@@ -345,6 +357,7 @@ function prepareRemoteBookmarkIndex(bookmarks) {
 
     const tags = extractTags(bookmark);
     const title = getBookmarkTitle(bookmark);
+    const normalizedUrl = normalizeBookmarkUrl(bookmark.url) || bookmark.url;
 
     for (const tag of tags) {
       const cacheKey = tag === null ? UNTAGGED_CACHE_KEY : tag;
@@ -354,15 +367,15 @@ function prepareRemoteBookmarkIndex(bookmarks) {
         tagMap.set(cacheKey, bucket);
       }
 
-      const existing = bucket.byUrl.get(bookmark.url);
+      const existing = bucket.byUrl.get(normalizedUrl);
       if (existing) {
         existing.title = title;
         continue;
       }
 
-      const record = { url: bookmark.url, title };
+      const record = { url: bookmark.url, title, normalizedUrl };
       bucket.list.push(record);
-      bucket.byUrl.set(bookmark.url, record);
+      bucket.byUrl.set(normalizedUrl, record);
     }
   }
 
@@ -380,7 +393,8 @@ async function syncFolderBookmarks(folderId, remoteEntries) {
 
   for (const child of children) {
     if (child.url) {
-      existingByUrl.set(child.url, child);
+      const normalizedUrl = normalizeBookmarkUrl(child.url) || child.url;
+      existingByUrl.set(normalizedUrl, child);
     } else {
       await browser.bookmarks.removeTree(child.id);
     }
@@ -389,10 +403,11 @@ async function syncFolderBookmarks(folderId, remoteEntries) {
   let created = 0;
 
   for (const remoteEntry of remoteEntries) {
-    const existing = existingByUrl.get(remoteEntry.url);
+    const key = remoteEntry.normalizedUrl || normalizeBookmarkUrl(remoteEntry.url) || remoteEntry.url;
+    const existing = existingByUrl.get(key);
 
     if (existing) {
-      existingByUrl.delete(remoteEntry.url);
+      existingByUrl.delete(key);
 
       if (existing.title !== remoteEntry.title) {
         await browser.bookmarks.update(existing.id, { title: remoteEntry.title });
