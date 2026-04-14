@@ -3,11 +3,11 @@
   "name": "Linkding Bookmark Sync",
   "version": "0.2.0",
   "description": "Sync a Linkding server with a Linkding bookmark folder in your browser.",
-  "author": "Alessandro Molina",
-  "homepage_url": "https://codeberg.org/Inlinestyle/linkding-sync",
+  "author": "Yuna Drago",
+  "homepage_url": "https://github.com/littlecodedragon/linkding-sync",
   "browser_specific_settings": {
     "gecko": {
-      "id": "{77a85a31-8247-498c-a898-a060e3b0b46d}",
+      "id": "{68a85a31-8247-498c-a898-a060e3b0b46d}",
       "strict_min_version": "120.0"
     }
   },
