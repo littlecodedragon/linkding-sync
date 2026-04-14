@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Linkding Bookmark Sync",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Sync a Linkding server with a Linkding bookmark folder in your browser.",
   "author": "Yuna Drago",
   "homepage_url": "https://github.com/littlecodedragon/linkding-sync",
@@ -14,7 +14,8 @@
         "authenticationInfo",
         "bookmarksInfo"
       ]
-      }
+      },
+      "gecko_android": {}
     }
   },
   "icons": {

@@ -1,0 +1,11 @@
+@media (pointer: coarse) {
+  :root {
+    --font-size: 1rem;
+    --font-size-sm: 0.85rem;
+    --html-font-size: 16px;
+  }
+  body {
+    min-width: unset;
+    font-size: calc(100vw / 375 * 1rem);
+  }
+}
